@@ -7,12 +7,29 @@
 1. 対象プロセス(VictimApp)がNDK内で利用している `std::rand` をフックして任意の値を返すようにする。
 2. 対象プロセス(VictimApp)のandroid.app.ActivityThread(AndroidのPrivate API)をフックし、任意の処理を差し込む。
 
+
 ## 用意するもの
 
-0. rootedな端末(本記事で利用したのは rootedなAndroid 5.1.1端末)
+1. rootedな端末(本記事で利用したのは rootedなAndroid 5.1.1端末)
+2. Android Studio 3.0.1
+3. ADB, Android SDK/NDK
+
+Androidをroot化する方法や、各種開発環境のセットアップは本記事では割愛します。
+
+## 作るもの
+
 1. 任意の処理を含むライブラリ (本記事では `libhooker.so` )
 2. 対象プロセス上で任意の処理を実行するための実行バイナリ (本記事では `inject` )
 3. 任意のJava Classを含むAPK (本記事では `hooker_app.apk` )
+
+本記事で引用しているソースコードは以下にあります。
+
+#### APIフックを実行するアプリ
+https://github.com/cimadai/hookerApp
+
+#### APIフックの犠牲となるアプリ
+https://github.com/cimadai/victimApp
+
 
 ## APIフックの手法(概要)
 
@@ -48,8 +65,6 @@
 ### 手順1. 実行したい関数を持つライブラリを作成
 
 まず始めに、対象プロセスにインジェクトしたいライブラリを作成します。
-
-本記事のソースコードの全体はこちら。
 
 #### inject.c (抜粋) 
 
@@ -411,7 +426,10 @@ public class MainActivity extends AppCompatActivity {
 
 ## 参考にしたURL
 
-- https://github.com/yangbean9/injectDemo
-- https://github.com/ele7enxxh/Android-Inline-Hook
-- http://taoyuanxiaoqi.com/2015/03/16/dexinject/
+- 任意のプロセスにSOファイルをインジェクトする
+    - https://github.com/yangbean9/injectDemo
+- Native worldで任意の関数をフックする 
+    - https://github.com/ele7enxxh/Android-Inline-Hook
+- 任意のアプリにクラスをインジェクトする
+    - http://taoyuanxiaoqi.com/2015/03/16/dexinject/
 
