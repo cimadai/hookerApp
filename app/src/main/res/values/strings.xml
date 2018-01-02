@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">HookerApp</string>
+    <string name="hook">HookAPI</string>
+    <string name="unhook">UnHookAPI</string>
+    <string name="inject_dex">InjectDex</string>
+</resources>
