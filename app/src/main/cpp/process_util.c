@@ -101,7 +101,8 @@ void *get_remote_func_address(pid_t target_pid, const char *lib_name, void *loca
     // 対象プロセスにおける対象ライブラリの開始アドレス
     remote_module_base = get_library_address(target_pid, lib_name);
 
-    /*目标进程函数地址= 目标进程lib库地址 + （本进程函数地址 -本进程lib库地址）*/
+    LOGD("Remote base = %x, Local base = %x, Local func addr = %x\n", remote_module_base, local_module_base, local_func_address);
+
     // 対象プロセスにおける対象関数のアドレス =
     //   対象プロセスにおける対象ライブラリの開始アドレス + (自プロセスにおける対象関数のアドレス - 自プロセスにおける対象ライブラリの開始アドレス)
     void *target_address = (void *) ((uint32_t) remote_module_base +

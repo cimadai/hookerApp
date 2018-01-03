@@ -52,7 +52,7 @@ int unhook_rand() {
  */
 int hook_entry(char *so_file_path) {
     LOGD("Hook success, pid = %d\n", getpid());
-    LOGD("Hello %s\n", so_file_path);
+    LOGD("Injecting %s\n", so_file_path);
     void *hooker = dlopen(so_file_path, RTLD_NOW);
     uint32_t new_rand_pointer = (uint32_t) dlsym(hooker, "new_rand");
     uint32_t *old_rand_pointer = (uint32_t *) dlsym(hooker, "old_rand");

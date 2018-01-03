@@ -350,7 +350,6 @@ static void doInlineHook(struct inlineHookItem *item)
     }
 
     if (TEST_BIT0(item->target_addr)) {
-        LOGD("TEST_BIT0 -> 1\n");
         int i;
 
         i = 0;
@@ -363,13 +362,11 @@ static void doInlineHook(struct inlineHookItem *item)
         ((uint16_t *) CLEAR_BIT0(item->target_addr))[i++] = item->new_addr >> 16;
     }
     else {
-        LOGD("TEST_BIT0 -> 2\n");
         ((uint32_t *) (item->target_addr))[0] = 0xe51ff004;	// LDR PC, [PC, #-4]
         ((uint32_t *) (item->target_addr))[1] = item->new_addr;
     }
 
     int m_ret = mprotect((void *) PAGE_START(CLEAR_BIT0(item->target_addr)), PAGE_SIZE * 2, PROT_READ | PROT_EXEC);
-    LOGD("mprotect result = %d\n", m_ret);
 
     item->status = HOOKED;
 

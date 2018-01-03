@@ -2,15 +2,18 @@
 
 この記事ではAndroid端末で対象のアプリが使っているNative APIやJava APIをフックして、任意の処理を差し込む方法を解説します。
 
+## おことわり
+
+本記事は純粋に技術的好奇心を満たすためのものであり、悪意ある行為を推奨するものではありません。
+
 ## 目的
 
 1. 対象プロセス(VictimApp)がNDK内で利用している `std::rand` をフックして任意の値を返すようにする。
 2. 対象プロセス(VictimApp)のandroid.app.ActivityThread(AndroidのPrivate API)をフックし、任意の処理を差し込む。
 
-
 ## 用意するもの
 
-1. rootedな端末(本記事で利用したのは rootedなAndroid 5.1.1端末)
+1. ARM系のrootedな端末(本記事で利用したのは rootedなAndroid 5.1.1端末)
 2. Android Studio 3.0.1
 3. ADB, Android SDK/NDK
 
@@ -20,7 +23,7 @@ Androidをroot化する方法や、各種開発環境のセットアップは本
 
 1. 任意の処理を含むライブラリ (本記事では `libhooker.so` )
 2. 対象プロセス上で任意の処理を実行するための実行バイナリ (本記事では `inject` )
-3. 任意のJava Classを含むAPK (本記事では `hooker_app.apk` )
+3. 任意のJava Classを含むAPK (本記事ではhookerAppの `app-debug.apk` )
 
 本記事で引用しているソースコードは以下にあります。
 
@@ -29,7 +32,6 @@ https://github.com/cimadai/hookerApp
 
 #### APIフックの犠牲となるアプリ
 https://github.com/cimadai/victimApp
-
 
 ## APIフックの手法(概要)
 
@@ -44,7 +46,7 @@ https://github.com/cimadai/victimApp
 1. ライブラリインジェクト (インジェクト用プロセス/Native World)
     - ptraceを利用し、対象プロセスにフック用ライブラリを読み込ませる。
     - その後ライブラリ内の自前の関数(フック用関数)を対象プロセス上で実行する。
-2. Native APIフック (対象プロセス/Native World)
+2. 手順2. Native APIフック (対象プロセス/Native World)
     - 対象プロセス上で改めて任意ライブラリを読み込み、メモリ上に展開(dlopen)する。
     - そのライブラリに含まれる関数と、置き換えたいNative APIを置換する。
 
@@ -60,15 +62,15 @@ https://github.com/cimadai/victimApp
     - リフレクションを利用し、Private APIを任意の処理に置換する。
 
 
-## APIフックの手法解説
+## Native APIフックの手法解説
 
 ### 手順1. 実行したい関数を持つライブラリを作成
 
 まず始めに、対象プロセスにインジェクトしたいライブラリを作成します。
 
-#### inject.c (抜粋) 
+#### [hooker.c (抜粋)](https://github.com/cimadai/hookerApp/blob/master/app/src/main/cpp/hooker.c)
 
-```
+```c:hooker.c(抜粋)
 // placeholder
 int (*old_rand)() = NULL;
  
@@ -103,7 +105,6 @@ int hook_rand(uint32_t new_rand, uint32_t *old_rand) {
  */
 int hook_entry(char *so_file_path) {
     LOGD("Hook success, pid = %d\n", getpid());
-    LOGD("Hello %s\n", so_file_path);
     void *hooker = dlopen(so_file_path, RTLD_NOW);
     uint32_t new_rand_pointer = (uint32_t) dlsym(hooker, "new_rand");
     uint32_t *old_rand_pointer = (uint32_t *) dlsym(hooker, "old_rand");
@@ -125,8 +126,9 @@ ARMプロセッサのレジスタを書き換え、対象関数を置き換え�
 
 ### 手順2. ライブラリを対象プロセスにインジェクトする実行ファイルの作成
 
-#### inject.c
-```
+#### [inject.c](https://github.com/cimadai/hookerApp/blob/master/app/src/main/cpp/inject.c)
+
+```c:inject.c
 #include <string.h>
 #include <dlfcn.h>
 #include <sys/mman.h>
@@ -334,15 +336,26 @@ int main(int argc, char **argv) {
 手順2で作成した `inject` を端末上で直接実行するか、アプリを通じて実行すると対象プロセスにインジェクトすることができます。
 
 直接実行の例)
+※「/data/data/net.cimadai.hooker_app/files」以下に `inject` を配置しておく
+
 ```
 PC>$ adb shell
+ 
 Android>$ su
 Android># cd /data/data/net.cimadai.hooker_app/files
-Android># ./inject net.cimadai.victim_app /data/data/net.cimadai.hooker_app/lib/libhooker.so hook_entry
+Android># ./inject \
+    net.cimadai.victim_app \
+    /data/data/net.cimadai.hooker_app/lib/libhooker.so \
+    hook_entry \
+    1 \
+    /data/data/net.cimadai.hooker_app/lib/libhooker.so
 ```
 
-アプリから実行する例) (抜粋)
-```
+アプリから実行する例)
+
+#### [MainActivity.java (抜粋)](https://github.com/cimadai/hookerApp/blob/master/app/src/main/java/net/cimadai/hookerApp/MainActivity.java)
+
+```java:MainActivity.java(抜粋)
 public class MainActivity extends AppCompatActivity {
     final String TAG = HookTool.TAG;
     final String TargetApp = "net.cimadai.victim_app";
@@ -421,15 +434,380 @@ public class MainActivity extends AppCompatActivity {
 
 アプリから実行する場合は、`inject` をAPK内のassetsに含めておき、アプリ内でfilesディレクトリに展開して利用します。
 
-また、この時にsupersuなどの確認ダイアログがポップアップしますので許可をしてください。
+assetsに配置するための設定は以下のCMakeLists.txtで行います。
 
+#### [CMakeLists.txt](https://github.com/cimadai/hookerApp/blob/master/app/CMakeLists.txt)
+
+```cmake:CMakeLists.txt
+cmake_minimum_required(VERSION 3.4.1)
+ 
+# 実行ファイルの出力先をassetsにする。
+set(EXECUTABLE_OUTPUT_PATH      "${CMAKE_CURRENT_SOURCE_DIR}/src/main/assets/${ANDROID_ABI}")
+ 
+# インジェクト用ライブラリ(libhooker.so)の定義
+add_library( hooker
+             SHARED
+             src/main/cpp/hooker.c
+             src/main/cpp/relocate.c
+             src/main/cpp/inline_hook.c
+             src/main/cpp/invoke_dex_method.c
+             )
+ 
+# インジェクト実行ファイル(inject)の定義
+add_executable(inject
+             src/main/cpp/ptrace_util.c
+             src/main/cpp/process_util.c
+             src/main/cpp/inject.c
+             )
+ 
+# リンクするライブラリ
+find_library( log-lib log )
+ 
+# リンク設定
+target_link_libraries( hooker ${log-lib} )
+target_link_libraries( inject ${log-lib} )
+```
+
+また、実行時にsupersuなどの確認ダイアログがポップアップしますので許可をしてください。
+
+### 実行結果
+
+以下のように、対象プロセスにライブラリファイルをインジェクトし、`std::rand`をフックすることができます。
+
+```
+? D/INJECT: start injecting process< 19876 > 
+? D/INJECT: target mmap address: b6e458f9
+? D/INJECT: Calling [mmap] in target process <19876> 
+? D/INJECT: Target process returned from mmap, return value=af87a000, pc=0 
+? D/INJECT: target_mmap_base: af87a000
+? D/INJECT: target dlopen address: b6faaf65
+? D/INJECT: Calling [dlopen] in target process <19876> 
+? D/INJECT: Target process returned from dlopen, return value=b0ecfbd4, pc=0 
+? D/INJECT: target dlsym address: b6faaf6d
+? D/INJECT: Calling [dlsym] in target process <19876> 
+? D/INJECT: Target process returned from dlsym, return value=af4c4fe9, pc=0 
+? D/INJECT: target hook_entry address: b6faaf6d
+? D/INJECT: Calling [hook_entry] in target process <19876> 
+victim_app D/INJECT: Hook success, pid = 19876
+victim_app D/INJECT: Hook result = 0
+? D/INJECT: Target process returned from hook_entry, return value=0, pc=0 
+? D/INJECT: Calling [dlclose] in target process <19876> 
+? D/INJECT: Target process returned from dlclose, return value=0, pc=0 
+```
+
+![image.png](https://qiita-image-store.s3.amazonaws.com/0/104844/df56525d-297f-16b1-ee50-9b96865237d9.png)
+左: std::randそのまま。  右: std::randをフックして99を返している。
+
+
+## Java APIフックの手法解説
+
+Java APIのフックは、Native APIのフックと違いJavaの世界で作業を行う必要があります。
+
+Native APIフックとの違いは、以下の２点です。
+1. APK(またはDEX)ファイルからインジェクトするクラスをロードする。
+2. インジェクトしたクラス内で既存のAndroidの処理を書き換える。
+
+対象プロセスにライブラリをインジェクトし、任意の処理を実行する`inject` のコードは同じものを利用します。
+
+### APK(またはDEX)ファイルからインジェクトするクラスをロードする
+
+#### [hooker.c (抜粋)](https://github.com/cimadai/hookerApp/blob/master/app/src/main/cpp/hooker.c)
+
+```c:hooker.c
+/**
+ * APKのメソッドをインジェクトして実行する
+ * @param apkPath インジェクトしたいAPK(DEX)
+ * @param cachePath 対象プロセスが書き込み権限を持つディレクトリ
+ * @param className APK内の実行したいクラス名
+ * @param methodName クラス内の実行したいメソッド名
+ * @return
+ */
+int inject_entry(char * apkPath, char * cachePath, char * className, char * methodName) {
+    LOGD("Start inject entry: %s, %s, %s, %s\n", apkPath, cachePath, className, methodName);
+    int ret = invoke_dex_method(apkPath, cachePath, className, methodName, 0, NULL);
+    LOGD("APK inject result = %d\n", ret);
+    return 0;
+}
+```
+
+#### [invoke_dex_method.c](https://github.com/cimadai/hookerApp/blob/master/app/src/main/cpp/invoke_dex_method.c)
+
+```c:invoke_dex_method.c
+#include <unistd.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <jni.h>
+#include <dlfcn.h>
+#include "log_util.h"
+
+JNIEnv* (*getJNIEnv)();
+
+/**
+ * DEXファイルをインジェクトし、メソッドを実行する。
+ * @param dexPath インジェクトするdexファイル
+ * @param dexOptDir キャッシュパス。対象アプリ・対象プロセスの書き込み権限に注意。
+ * @param className インジェクト後に実行したいクラス名
+ * @param methodName 実行したいメソッド名
+ * @param argc 引数の数
+ * @param argv 引数
+ * @return
+ */
+int invoke_dex_method(const char* dexPath, const char* dexOptDir, const char* className, const char* methodName, int argc, char *argv[]) {
+    LOGD("dexPath = %s, dexOptDir = %s, className = %s, methodName = %s\n", dexPath, dexOptDir, className, methodName);
+    // JNIEnvの取得
+    void* handle = dlopen("/system/lib/libandroid_runtime.so", RTLD_NOW);
+    getJNIEnv = dlsym(handle, "_ZN7android14AndroidRuntime9getJNIEnvEv");
+    JNIEnv* env = getJNIEnv();
+    LOGD("JNIEnv = %x\n", env);
+
+    // ClassLoaderのgetSystemClassLoaderを呼び出し、現在のプロセスのClassLoaderを取得
+    jclass classloaderClass = (*env)->FindClass(env,"java/lang/ClassLoader");
+    jmethodID getsysloaderMethod = (*env)->GetStaticMethodID(env,classloaderClass, "getSystemClassLoader", "()Ljava/lang/ClassLoader;");
+    jobject loader = (*env)->CallStaticObjectMethod(env, classloaderClass, getsysloaderMethod);
+    LOGD("loader = %x\n", loader);
+
+    // 現在のClassLoaderで処理するために、DexClassLoaderでdexファイルを読み込む
+    jstring dexpath = (*env)->NewStringUTF(env, dexPath);
+    jstring dex_odex_path = (*env)->NewStringUTF(env,dexOptDir);
+    jclass dexLoaderClass = (*env)->FindClass(env,"dalvik/system/DexClassLoader");
+    jmethodID initDexLoaderMethod = (*env)->GetMethodID(env, dexLoaderClass, "<init>", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/ClassLoader;)V");
+    jobject dexLoader = (*env)->NewObject(env, dexLoaderClass, initDexLoaderMethod,dexpath,dex_odex_path,NULL,loader);
+    LOGD("dexLoader = %x\n", dexLoader);
+
+    // DexClassLoaderを使って実行するコードを読み込む
+    jmethodID findclassMethod = (*env)->GetMethodID(env,dexLoaderClass,"findClass","(Ljava/lang/String;)Ljava/lang/Class;");
+    jstring javaClassName = (*env)->NewStringUTF(env,className);
+    jclass javaClientClass = (*env)->CallObjectMethod(env,dexLoader,findclassMethod,javaClassName);
+    if (!javaClientClass) {
+        LOGD("Failed to load target class %s\n", className);
+        printf("Failed to load target class %s\n", className);
+        return -1;
+    }
+
+    // インジェクトするメソッドを取得する
+    jmethodID start_inject_method = (*env)->GetStaticMethodID(env, javaClientClass, methodName, "()V");
+    if (!start_inject_method) {
+        LOGD("Failed to load target method %s\n", methodName);
+        printf("Failed to load target method %s\n", methodName);
+        return -1;
+    }
+
+    // メソッドを実行 (このメソッドはpublic static voidなメソッドである必要がある。)
+    (*env)->CallStaticVoidMethod(env,javaClientClass,start_inject_method);
+    return 0;
+}
+```
+
+hooker.c に新たにinject_entry関数を追加します。
+この関数では、渡された引数をもとに対象プロセスに対してJavaのメソッドをインジェクトして実行します。
+
+### インジェクトしたクラス内で既存のAndroidの処理を書き換える。
+
+次に、インジェクトされるクラスとメソッドを作成していきます。
+
+#### [HookTool.java](https://github.com/cimadai/hookerApp/blob/master/app/src/main/java/net/cimadai/hookerApp/HookTool.java)
+
+```java:HookTool.java
+package net.cimadai.hookerApp;
+
+import android.annotation.SuppressLint;
+import android.os.Handler;
+import android.util.Log;
+
+import java.lang.reflect.Field;
+
+public class HookTool {
+    public static final String TAG = "INJECT";
+
+    public static void dexInject() throws ClassNotFoundException, IllegalAccessException {
+        Log.d(TAG, "This is dex code. Start hooking process in Java world.");
+
+        try {
+            // PrivateなActivityThreadをフックする。
+            // see: http://androidxref.com/5.1.1_r6/xref/frameworks/base/core/java/android/app/ActivityThread.java#sCurrentActivityThread
+            @SuppressLint("PrivateApi") Class<?> activityThreadClass = Class.forName("android.app.ActivityThread");
+
+            Field currentActivityThreadField = activityThreadClass.getDeclaredField("sCurrentActivityThread");
+            currentActivityThreadField.setAccessible(true);
+            Object currentActivityThread = currentActivityThreadField.get(null);
+
+            Field mHField = activityThreadClass.getDeclaredField("mH");
+            mHField.setAccessible(true);
+            Handler mH = (Handler) mHField.get(currentActivityThread);
+
+            Field mCallbackField = Handler.class.getDeclaredField("mCallback");
+            mCallbackField.setAccessible(true);
+            Handler.Callback oriCallback = (Handler.Callback) mCallbackField.get(mH);
+            Handler.Callback hookCallBack = new HookCallback(oriCallback);
+            mCallbackField.set(mH, hookCallBack);
+        } catch (IllegalArgumentException | NoSuchFieldException e) {
+            e.printStackTrace();
+            Log.d(TAG, "Failed to hook in Java world.");
+        }
+    }
+
+}
+```
+
+#### [HookCallback.java](https://github.com/cimadai/hookerApp/blob/master/app/src/main/java/net/cimadai/hookerApp/HookCallback.java)
+
+```java:HookCallback.java
+package net.cimadai.hookerApp;
+
+import android.os.Handler;
+import android.os.Message;
+import android.util.Log;
+
+/**
+ * ActivityThread内の`mH: Handle`内のmCallbackをフックするクラス
+ * http://androidxref.com/5.1.1_r6/xref/frameworks/base/core/java/android/os/Handler.java
+ * コンストラクタで元々のコールバックを渡す。
+ */
+public class HookCallback implements Handler.Callback {
+    private final String TAG = HookTool.TAG;
+    public static final int RESUME_ACTIVITY         = 107;
+    public static final int PAUSE_ACTIVITY          = 101;
+
+    private Handler.Callback mParentCallback;
+    public HookCallback(Handler.Callback parentCallback){
+        mParentCallback = parentCallback;
+    }
+
+    @Override
+    public boolean handleMessage(Message msg) {
+        switch (msg.what) {
+            case RESUME_ACTIVITY:
+                Log.d(TAG, "Hook activity resume!!!");
+                break;
+            case PAUSE_ACTIVITY:
+                Log.d(TAG, "Hook activity pause!!!");
+                break;
+            default:
+                Log.d(TAG, "Hook a " + msg.what);
+                break;
+        }
+
+        if (mParentCallback != null){
+            return mParentCallback.handleMessage(msg);
+        }else{
+            return false;
+        }
+    }
+}
+```
+
+これらのクラスを作成し、Android Studioのメニューの Build -> Build APK(s) でビルドします。
+出来た app-debug.apk を端末上にpushし、read権限を付与しておきます。
+
+この状態で、`inject`を端末上で直接実行するか、アプリを通じて実行すると対象プロセスにHookTool.javaおよびをHookCallback.javaをインジェクトすることができます。
+
+直接実行の例)
+※「/data/data/net.cimadai.hooker_app/files」以下に `inject` 、 `app-debug.apk` を配置しておく。
+
+```
+PC>$ adb shell
+ 
+Android>$ su
+Android># cd /data/data/net.cimadai.hooker_app/files
+Android># ll
+root@C5503:/data/data/net.cimadai.hooker_app/files # ll
+-rwxrwxrwx root     sdcard_r  1635546 2017-12-31 23:45 app-debug.apk
+-rwxrw---- u0_a264  u0_a264     55492 2018-01-01 18:47 inject
+
+Android># ./inject \
+    net.cimadai.victim_app \
+    /data/data/net.cimadai.hooker_app/lib/libhooker.so \
+    inject_entry \
+    4 \
+    /data/data/net.cimadai.hooker_app/files/app-debug.apk \
+    /data/data/net.cimadai.victim_app/cache \
+    net/cimadai/hookerApp/HookTool \
+    dexInject
+```
+
+アプリから実行する例)
+
+#### [MainActivity.java (抜粋)](https://github.com/cimadai/hookerApp/blob/master/app/src/main/java/net/cimadai/hookerApp/MainActivity.java)
+
+```java:MainActivity.java
+public class MainActivity extends AppCompatActivity {
+    final String TAG = HookTool.TAG;
+    final String TargetApp = "net.cimadai.victim_app";
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+
+        // ...
+
+        // TargetアプリのコアコードのActivityThreadをフックする
+        Button injectDex = (Button) findViewById(R.id.inject_dex);
+        injectDex.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                Log.d(TAG, "InjectDex onclick");
+                if (apkFile.exists() && apkFile.canRead()) {
+                    final String method = "inject_entry";
+                    String[] cmd = new String[] {
+                            "su",
+                            "-c",
+                            execFile.getAbsolutePath(), // inject
+                            TargetApp, // target process
+                            soFile.getAbsolutePath(), // inject so path
+                            method, // method name
+                            "4", // param count
+                            apkFile.getAbsolutePath(), // param 1 (inject dex file path)
+                            cacheDir.getAbsolutePath(), // param 2 (cache dir)
+                            "net/cimadai/hookerApp/HookTool", // param 3 (inject class)
+                            "dexInject" // param 4 (inject method)
+                    };
+                    Log.d(TAG, apkFile.getAbsolutePath());
+                    Log.d(TAG, cacheDir.getAbsolutePath());
+
+                    runCommand(method, cmd);
+                } else {
+                    if (!apkFile.exists()) {
+                        toastMessage("There is no app-debug.apk or not.");
+                    }
+                    if (!apkFile.canRead()) {
+                        toastMessage("The app-debug.apk is not readable.");
+                    }
+                }
+            }
+        });
+    }
+
+    // ...
+}
+```
+
+### 実行結果
+
+以下のように、対象プロセスにクラスをインジェクトし、Activityのライフサイクルに処理を挟み込むことができます。
+この例ではログ出力を追加していますので、対象プロセスをバックグラウンドにしたりフォアグラウンドにすることでログが出力されます。
+
+```
+victim_app D/INJECT: Hook activity pause!!!
+victim_app D/INJECT: Hook a 104
+victim_app D/INJECT: Hook a 140
+victim_app D/INJECT: Hook activity resume!!!
+victim_app D/INJECT: Hook a 149
+```
+
+## まとめ
+
+本記事ではARM SoCを持つ対象と端末上で動作する任意のプロセスに任意のライブラリをインジェクトして任意の関数を実行する方法と、そのプロセス内の処理を自在に変更する方法を解説しました。
+
+このような手法により自身のアプリの処理を書き換えられてしまう可能性もありますので、
+Androidでメモリ改ざん攻撃やデバッグのためのptraceを防ぐことができる開発者向けのセキュリティサービスを利用するのが良いでしょう。
 
 ## 参考にしたURL
 
-- 任意のプロセスにSOファイルをインジェクトする
-    - https://github.com/yangbean9/injectDemo
-- Native worldで任意の関数をフックする 
-    - https://github.com/ele7enxxh/Android-Inline-Hook
-- 任意のアプリにクラスをインジェクトする
-    - http://taoyuanxiaoqi.com/2015/03/16/dexinject/
+- https://github.com/yangbean9/injectDemo
+- https://github.com/ele7enxxh/Android-Inline-Hook
+- http://taoyuanxiaoqi.com/2015/03/16/dexinject/
+
+
 
